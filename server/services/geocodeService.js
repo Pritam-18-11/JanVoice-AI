@@ -1,37 +1,42 @@
 import axios from 'axios';
 
-// Reverse geocodes GPS coordinates into Area / Ward / District using the
-// real Google Maps Geocoding API. This is authoritative — it's always
-// re-run on the backend even if the client suggests something different.
+// FREE reverse geocoding via OpenStreetMap's Nominatim API — no API key, no
+// billing account, no credit card required. Usage policy: keep requests to
+// roughly 1/second and always send a descriptive User-Agent (required by
+// Nominatim's fair-use policy, not optional).
 export async function reverseGeocode(lat, lng) {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
-    console.warn('GOOGLE_MAPS_API_KEY not set — returning placeholder location data.');
-    return { areaName: 'Unknown Area', ward: 'Unknown Ward', district: 'Unknown District' };
-  }
-
   try {
-    const { data } = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
-      params: { latlng: `${lat},${lng}`, key: apiKey },
+    const { data } = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+      params: {
+        format: 'json',
+        lat,
+        lon: lng,
+        zoom: 18,
+        addressdetails: 1,
+      },
+      headers: {
+        // Replace the email with your own — Nominatim asks for a way to contact you if usage needs to be throttled
+        'User-Agent': 'JanVoiceAI-Hackathon-Project/1.0 (your-email@example.com)',
+      },
     });
 
-    if (data.status !== 'OK' || !data.results?.length) {
-      return { areaName: 'Unknown Area', ward: 'Unknown Ward', district: 'Unknown District' };
-    }
+    const address = data.address || {};
 
-    const components = data.results[0].address_components;
-    const find = (type) => components.find((c) => c.types.includes(type))?.long_name;
+    const areaName =
+      address.suburb ||
+      address.neighbourhood ||
+      address.road ||
+      address.village ||
+      data.display_name?.split(',')[0] ||
+      'Unknown Area';
 
-    // India doesn't have a "ward" field in Google's address component types,
-    // so we approximate: sublocality_level_2 (finer) or sublocality_level_1 (broader)
-    const areaName = find('sublocality_level_1') || find('locality') || data.results[0].formatted_address;
-    const ward = find('sublocality_level_2') || find('sublocality_level_1') || 'Ward Unknown';
-    const district = find('administrative_area_level_2') || find('administrative_area_level_1') || 'District Unknown';
+    const ward = address.suburb || address.neighbourhood || address.city_district || 'Ward Unknown';
+
+    const district = address.state_district || address.county || address.city || 'District Unknown';
 
     return { areaName, ward, district };
   } catch (err) {
-    console.error('Geocoding error:', err.message);
+    console.error('Nominatim geocoding error:', err.message);
     return { areaName: 'Unknown Area', ward: 'Unknown Ward', district: 'Unknown District' };
   }
 }
