@@ -16,7 +16,7 @@ export async function reverseGeocode(lat, lng) {
       },
       headers: {
         // Replace the email with your own — Nominatim asks for a way to contact you if usage needs to be throttled
-        'User-Agent': 'JanVoiceAI-Hackathon-Project/1.0 (your-email@example.com)',
+        'User-Agent': 'JanVoiceAI-Hackathon-Project/1.0 (fspritam444@gmail.com)',
       },
     });
 
