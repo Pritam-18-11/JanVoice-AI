@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-ro
 import { AuthProvider } from './context/AuthContext';
 import { GrievanceProvider } from './context/GrievanceContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import LandingPage from './pages/LandingPage';
@@ -45,47 +46,49 @@ function PhasePlaceholder({ title, description, badge, nextStep }) {
 
 function App() {
   return (
-    <AuthProvider>
-      <GrievanceProvider>
-        <Router>
-          <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:text-slate-100 select-none">
-            <Navbar />
+    <ErrorBoundary>
+      <AuthProvider>
+        <GrievanceProvider>
+          <Router>
+            <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:text-slate-100 select-none">
+              <Navbar />
 
-            <main className="flex-grow">
-              <Routes>
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/citizen" element={<CitizenPortal />} />
-                <Route path="/citizen/track/:id" element={<CitizenPortal />} />
+              <main className="flex-grow">
+                <Routes>
+                  <Route path="/" element={<LandingPage />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/citizen" element={<CitizenPortal />} />
+                  <Route path="/citizen/track/:id" element={<CitizenPortal />} />
 
-                <Route path="/ai-pipeline" element={<AiPipeline />} />
+                  <Route path="/ai-pipeline" element={<AiPipeline />} />
 
-                <Route
-                  path="/dashboard"
-                  element={
-                    <ProtectedRoute allowedRoles={['mla']}>
-                      <MlaDashboard />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/admin"
-                  element={
-                    <ProtectedRoute allowedRoles={['admin']}>
-                      <AdminDashboard />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute allowedRoles={['mla']}>
+                        <MlaDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <AdminDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route path="*" element={<Navigate to="/" />} />
-              </Routes>
-            </main>
+                  <Route path="*" element={<Navigate to="/" />} />
+                </Routes>
+              </main>
 
-            <Footer />
-          </div>
-        </Router>
-      </GrievanceProvider>
-    </AuthProvider>
+              <Footer />
+            </div>
+          </Router>
+        </GrievanceProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -34,7 +34,7 @@ const complaintSchema = new mongoose.Schema(
 
     imageUrl: { type: String, default: null },
     imageClassification: { type: String, default: 'Not yet processed by AI pipeline' },
-    imageConfidence: { type: Number, default: null }, // 0–100, from Gemini Vision
+    imageConfidence: { type: Number, default: null },
 
     status: {
       type: String,
@@ -47,16 +47,27 @@ const complaintSchema = new mongoose.Schema(
     impact: { type: String, default: 'Awaiting AI Analysis' },
     summary: { type: String, default: 'AI processing in progress...' },
     recommendation: { type: String, default: 'Suggested solution pending AI pipeline.' },
-    aiConfidenceScore: { type: Number, default: null }, // 0–100, Gemini's confidence in its own analysis
+    aiConfidenceScore: { type: Number, default: null },
 
-    // Duplicate / cluster detection (Phase 2)
     duplicateOf: { type: mongoose.Schema.Types.ObjectId, ref: 'Complaint', default: null },
-    mergedCount: { type: Number, default: 1 }, // how many citizen reports point to this same underlying issue
+    mergedCount: { type: Number, default: 1 },
 
     timeline: [timelineStepSchema],
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
+
+// BUG FIX (Phase 3): the frontend has always read `complaint.timestamp`, but the
+// schema never defined that field — only Mongoose's auto `createdAt` existed.
+// This virtual makes `.timestamp` return `createdAt` in every API response,
+// with zero frontend changes required.
+complaintSchema.virtual('timestamp').get(function () {
+  return this.createdAt;
+});
 
 complaintSchema.pre('save', function (next) {
   if (this.isNew) {

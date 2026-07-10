@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useGrievances } from '../context/GrievanceContext';
+import api from '../api/axios';
+import jsPDF from 'jspdf';
 import L from 'leaflet';
 import { 
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, Legend, BarChart, Bar
@@ -7,12 +9,12 @@ import {
 import { 
   BarChart3, Landmark, MapPin, Search, Filter, AlertTriangle, 
   CheckCircle2, Clock, Users, ArrowUpRight, Send, HelpCircle, 
-  X, Briefcase, FileText, ChevronRight, Check
+  X, Briefcase, FileText, ChevronRight, Check, Bell, Loader2, Inbox
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function MlaDashboard() {
-  const { complaints, updateComplaintStatus } = useGrievances();
+  const { complaints, updateComplaintStatus, loading, newCount, clearNewCount } = useGrievances();
 
   // Dashboard Filters & Table States
   const [searchTerm, setSearchTerm] = useState('');
@@ -26,9 +28,13 @@ export default function MlaDashboard() {
   
   // Chat Assistant States
   const [chatMessages, setChatMessages] = useState([
-    { sender: 'ai', text: "Hello Representative. I am your JanVoice AI Assistant. Ask me to extract reports, show priority issues, or compile monthly summaries." }
+    { sender: 'ai', text: "Hello Representative. I am your JanVoice AI Assistant, powered by Gemini. Ask me to extract reports, show priority issues, or compile monthly summaries." }
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+
+  // Notification bell dropdown
+  const [showNotifications, setShowNotifications] = useState(false);
   
   // Report Modal State
   const [showReport, setShowReport] = useState(false);
@@ -103,7 +109,7 @@ export default function MlaDashboard() {
     };
   }, []);
 
-  // Compute Chart Data: Category distribution
+  // Compute Chart Data: Category distribution (real, derived from live complaints)
   const categoryCounts = complaints.reduce((acc, c) => {
     acc[c.category] = (acc[c.category] || 0) + 1;
     return acc;
@@ -116,94 +122,129 @@ export default function MlaDashboard() {
 
   const COLORS = ['#0ea5e9', '#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#f59e0b', '#10b981'];
 
-  // Trend Chart Data
-  const trendData = [
-    { name: 'Mon', Resolved: 12, Filed: 15 },
-    { name: 'Tue', Resolved: 15, Filed: 18 },
-    { name: 'Wed', Resolved: 19, Filed: 22 },
-    { name: 'Thu', Resolved: 22, Filed: 20 },
-    { name: 'Fri', Resolved: 28, Filed: 24 },
-    { name: 'Sat', Resolved: 32, Filed: 14 },
-    { name: 'Sun', Resolved: 36, Filed: 12 }
-  ];
+  // Real 7-day trend — filed vs resolved counts derived from actual timestamps (Phase 3, replaces hardcoded dummy data)
+  const trendData = useMemo(() => {
+    const days = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      days.push(d);
+    }
 
-  // Execute AI Assistant Query Filters
-  const handleAIQuery = (queryType, queryText) => {
-    const userMsg = { sender: 'user', text: queryText };
-    setChatMessages(prev => [...prev, userMsg]);
+    return days.map((day) => {
+      const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
 
-    setTimeout(() => {
-      let reply = "";
-      switch (queryType) {
-        case 'roads':
-          setCategoryFilter("Road Infrastructure");
-          setStatusFilter("All");
-          setSortBy("priority");
-          setLimitCount(5);
-          reply = "I have filtered the grid below to show the top 5 Road Infrastructure issues, sorted by priority rating.";
-          break;
-        case 'priority':
-          setCategoryFilter("All");
-          setStatusFilter("All");
-          setSortBy("priority");
-          setLimitCount(null);
-          reply = "Here are all complaints sorted by priority score in descending order. Critical issues are at the top.";
-          break;
-        case 'ward10':
-          setSearchTerm("Ward 10");
-          setCategoryFilter("All");
-          setStatusFilter("All");
-          setSortBy("priority");
-          setLimitCount(null);
-          reply = "Filtered to Ward 10 reports. Rending coordinates grid below.";
-          break;
-        case 'drainage':
-          setCategoryFilter("Drainage & Sewerage");
-          setStatusFilter("All"); // show all unresolved
-          setSortBy("priority");
-          setLimitCount(null);
-          reply = "Showing unresolved drainage issues. You can allocate Area Development Funds using the 'Allocate Budget' panel.";
-          break;
-        case 'report':
-          setShowReport(true);
-          reply = "Monthly Progress and Governance report generated. Rendered report card overlay on your viewport.";
-          break;
-        default:
-          reply = "I analyzed your query but could not match a structured search index. Here is the full active list.";
-          break;
-      }
+      const filed = complaints.filter((c) => {
+        const t = new Date(c.timestamp);
+        return t >= dayStart && t < dayEnd;
+      }).length;
 
-      setChatMessages(prev => [...prev, { sender: 'ai', text: reply }]);
-    }, 800);
+      const resolvedOnDay = complaints.filter((c) => {
+        if (c.status !== 'Resolved') return false;
+        const resolvedStep = c.timeline?.find((s) => s.status === 'Resolved' && s.time);
+        if (!resolvedStep) return false;
+        const t = new Date(resolvedStep.time);
+        return t >= dayStart && t < dayEnd;
+      }).length;
+
+      return {
+        name: dayStart.toLocaleDateString('en-US', { weekday: 'short' }),
+        Filed: filed,
+        Resolved: resolvedOnDay,
+      };
+    });
+  }, [complaints]);
+
+  // Real AI Assistant — sends the query to Gemini via the backend and applies the returned filter
+  const runAIQuery = async (queryText) => {
+    if (!queryText.trim() || aiLoading) return;
+    setChatMessages((prev) => [...prev, { sender: 'user', text: queryText }]);
+    setAiLoading(true);
+
+    try {
+      const { data } = await api.post('/ai-query', { query: queryText });
+      setCategoryFilter(data.category);
+      setStatusFilter(data.status);
+      setSortBy(data.sortBy);
+      setLimitCount(data.limit);
+      setSearchTerm(data.ward || data.searchTerm || '');
+      setChatMessages((prev) => [...prev, { sender: 'ai', text: data.reply }]);
+    } catch (err) {
+      setChatMessages((prev) => [...prev, { sender: 'ai', text: "Sorry, I had trouble reaching the AI service. Please try rephrasing your query." }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleReportChip = () => {
+    setChatMessages((prev) => [
+      ...prev,
+      { sender: 'user', text: 'Generate monthly report' },
+      { sender: 'ai', text: 'Monthly Progress and Governance report generated. Rendered report card overlay on your viewport — download it as a PDF from there.' },
+    ]);
+    setShowReport(true);
   };
 
   const handleCustomSearchSubmit = (e) => {
     e.preventDefault();
-    if (!chatInput) return;
-    const text = chatInput.toLowerCase();
-    setChatMessages(prev => [...prev, { sender: 'user', text: chatInput }]);
+    const text = chatInput;
     setChatInput('');
+    runAIQuery(text);
+  };
 
-    setTimeout(() => {
-      let reply = "Processing search query...";
-      if (text.includes("road") || text.includes("street")) {
-        setCategoryFilter("Road Infrastructure");
-        reply = "Filtered to Road Infrastructure grievances.";
-      } else if (text.includes("high") || text.includes("priority")) {
-        setSortBy("priority");
-        reply = "Sorted records by descending priority score.";
-      } else if (text.includes("ward 10")) {
-        setSearchTerm("Ward 10");
-        reply = "Database filtered to Ward 10.";
-      } else if (text.includes("report")) {
-        setShowReport(true);
-        reply = "Monthly PDF/Print report preview loaded.";
-      } else {
-        setSearchTerm(chatInput);
-        reply = `Searching records for keyword: "${chatInput}"`;
-      }
-      setChatMessages(prev => [...prev, { sender: 'ai', text: reply }]);
-    }, 700);
+  // Real PDF export (Phase 3) — replaces the old fake alert()
+  const handleDownloadPDF = () => {
+    const doc = new jsPDF();
+    const marginX = 15;
+    let y = 20;
+
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text('JanVoice AI — Ward Monthly Progress Report', marginX, y);
+    y += 8;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(100);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, marginX, y);
+    y += 12;
+
+    doc.setTextColor(0);
+    doc.setFontSize(13);
+    doc.setFont(undefined, 'bold');
+    doc.text('Resolution Summary', marginX, y);
+    y += 7;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Total Filed: ${totalCount}`, marginX, y); y += 6;
+    doc.text(`Resolved: ${resolvedCount}`, marginX, y); y += 6;
+    doc.text(`Resolution Rate: ${Math.round((resolvedCount / totalCount) * 100) || 0}%`, marginX, y); y += 6;
+    doc.text(`Average AI Priority Score: ${avgPriority}/100`, marginX, y); y += 12;
+
+    doc.setFontSize(13);
+    doc.setFont(undefined, 'bold');
+    doc.text('Top Priority Issues', marginX, y);
+    y += 8;
+    doc.setFontSize(9);
+
+    const topIssues = [...complaints].sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 12);
+    if (topIssues.length === 0) {
+      doc.setFont(undefined, 'normal');
+      doc.text('No complaints on record yet.', marginX, y);
+    }
+    topIssues.forEach((c, i) => {
+      if (y > 275) { doc.addPage(); y = 20; }
+      doc.setFont(undefined, 'bold');
+      doc.text(`${i + 1}. [Priority ${c.priorityScore}] ${c.title}`, marginX, y);
+      y += 5;
+      doc.setFont(undefined, 'normal');
+      doc.text(`${c.id}  |  ${c.category}  |  ${c.ward}  |  Status: ${c.status}`, marginX + 4, y);
+      y += 7;
+    });
+
+    doc.save(`JanVoice-AI-Report-${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   // Filter complaints list
@@ -252,6 +293,9 @@ export default function MlaDashboard() {
     updateComplaintStatus(id, "MLA Reviewed", "MLA allocated ₹2.5 Lakhs from Local Area Development (LAD) fund.");
     setTimeout(() => setAllocatedBudget(false), 2000);
   };
+
+  // Phase 4 — skeleton loading state for the very first data fetch
+  const initialLoading = loading && complaints.length === 0;
 
   return (
     <div className="pt-24 pb-12 bg-slate-50 min-h-screen grid-bg relative">
@@ -313,7 +357,7 @@ export default function MlaDashboard() {
                 <button onClick={() => setShowReport(false)} className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50">
                   Close Preview
                 </button>
-                <button onClick={() => alert("PDF report generated successfully.")} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow">
+                <button onClick={handleDownloadPDF} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow">
                   Download PDF Report
                 </button>
               </div>
@@ -333,14 +377,64 @@ export default function MlaDashboard() {
             <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Governance Intelligence Dashboard</h1>
             <p className="text-slate-500 text-sm">Analyze regional grievances, locate hotspots, and authorize Area Development funds.</p>
           </div>
-          <div className="text-xs font-semibold text-slate-500 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            Representative: <b>MLA Pritam Saha</b> (Ward 10)
+          <div className="flex items-center gap-3">
+            {/* Notification Bell (Phase 3) */}
+            <div className="relative">
+              <button
+                onClick={() => { setShowNotifications((v) => !v); if (!showNotifications) clearNewCount(); }}
+                className="relative p-2.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-sm text-slate-500 transition-colors"
+              >
+                <Bell className="w-4 h-4" />
+                {newCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 w-4.5 h-4.5 min-w-[18px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-white">
+                    {newCount > 9 ? '9+' : newCount}
+                  </span>
+                )}
+              </button>
+              <AnimatePresence>
+                {showNotifications && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 p-4 z-30 text-xs"
+                  >
+                    <span className="font-bold text-slate-700 block mb-2">Live Updates</span>
+                    <p className="text-slate-500 leading-relaxed">
+                      New complaints are checked every 30 seconds. {newCount === 0 ? "You're all caught up." : `${newCount} new complaint(s) just arrived.`}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <div className="text-xs font-semibold text-slate-500 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              Representative: <b>MLA Pritam Saha</b> (Ward 10)
+            </div>
           </div>
         </div>
 
+        {initialLoading ? (
+          /* Phase 4 — skeleton loading state for the first data fetch */
+          <div className="space-y-8 animate-pulse">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="glass-card p-5 rounded-2xl h-24 bg-slate-100/70" />
+              ))}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="lg:col-span-7 glass-card rounded-3xl h-[400px] bg-slate-100/70" />
+              <div className="lg:col-span-5 glass-card rounded-3xl h-[400px] bg-slate-100/70" />
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Top 4 Metrics Stats Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5"
+        >
           <div className="glass-card p-5 rounded-2xl flex items-center justify-between">
             <div className="space-y-1">
               <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Complaints</span>
@@ -380,7 +474,7 @@ export default function MlaDashboard() {
               <BarChart3 className="w-6 h-6" />
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Mid Grid: GIS Map & Recharts Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -404,7 +498,7 @@ export default function MlaDashboard() {
           <div className="lg:col-span-5 glass-card p-5 rounded-3xl flex flex-col justify-between h-[400px]">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
               <h3 className="font-extrabold text-slate-800 text-sm">Grievance Trends & Category Allocation</h3>
-              <span className="text-[10px] text-slate-400 font-mono font-bold">Weekly Log</span>
+              <span className="text-[10px] text-slate-400 font-mono font-bold">Last 7 Days (Live)</span>
             </div>
 
             {/* Recharts Container */}
@@ -422,7 +516,7 @@ export default function MlaDashboard() {
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} />
-                  <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} />
+                  <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} allowDecimals={false} />
                   <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px' }} />
                   <Legend wrapperStyle={{ fontSize: '10px' }} />
                   <Area type="monotone" dataKey="Filed" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#colorFiled)" />
@@ -432,7 +526,7 @@ export default function MlaDashboard() {
             </div>
 
             <div className="text-[10px] text-slate-400 font-semibold bg-slate-50 p-2 rounded-xl text-center border border-slate-100">
-              Resolved rate increased by 18% following desilting drive in Ward 12.
+              {totalCount === 0 ? 'No complaints filed yet — data will appear here as citizens submit reports.' : `Tracking ${totalCount} total grievances across the ward.`}
             </div>
           </div>
         </div>
@@ -501,7 +595,14 @@ export default function MlaDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {filteredComplaints.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-12 text-slate-400 italic">No matching complaints found.</td>
+                      <td colSpan={6} className="text-center py-14">
+                        <div className="flex flex-col items-center gap-2 text-slate-400">
+                          <Inbox className="w-8 h-8 stroke-1" />
+                          <span className="italic text-xs">
+                            {totalCount === 0 ? 'No complaints filed yet.' : 'No matching complaints found — try adjusting your filters.'}
+                          </span>
+                        </div>
+                      </td>
                     </tr>
                   ) : (
                     filteredComplaints.map((c) => (
@@ -558,6 +659,7 @@ export default function MlaDashboard() {
             <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
               <span className="w-2.5 h-2.5 rounded-full bg-sky-500 animate-pulse"></span>
               <h3 className="font-extrabold text-slate-900 text-sm">Grievance AI Assistant</h3>
+              <span className="text-[9px] text-slate-400 font-mono ml-auto">Gemini</span>
             </div>
 
             {/* Chat Messages Log */}
@@ -573,30 +675,41 @@ export default function MlaDashboard() {
                   </div>
                 </div>
               ))}
+              {aiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-slate-100 border border-slate-150 rounded-2xl rounded-tl-none p-3 flex items-center gap-1.5 text-slate-400">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span className="text-[10px] font-semibold">Thinking...</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* AI Action Quick Chips */}
             <div className="flex flex-wrap gap-1.5 py-2 border-t border-slate-100">
               <button 
-                onClick={() => handleAIQuery('roads', "Show top 5 road issues")}
-                className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-700 rounded-lg text-[9px] font-bold"
+                disabled={aiLoading}
+                onClick={() => runAIQuery("Show top 5 road issues")}
+                className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-700 rounded-lg text-[9px] font-bold disabled:opacity-50"
               >
                 Top 5 Road Issues
               </button>
               <button 
-                onClick={() => handleAIQuery('priority', "Show highest priority complaints")}
-                className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-700 rounded-lg text-[9px] font-bold"
+                disabled={aiLoading}
+                onClick={() => runAIQuery("Show highest priority complaints")}
+                className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-700 rounded-lg text-[9px] font-bold disabled:opacity-50"
               >
                 Highest Priority
               </button>
               <button 
-                onClick={() => handleAIQuery('ward10', "Show complaints from Ward 10")}
-                className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-700 rounded-lg text-[9px] font-bold"
+                disabled={aiLoading}
+                onClick={() => runAIQuery("Show complaints from Ward 10")}
+                className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-700 rounded-lg text-[9px] font-bold disabled:opacity-50"
               >
                 Ward 10 List
               </button>
               <button 
-                onClick={() => handleAIQuery('report', "Generate monthly report")}
+                onClick={handleReportChip}
                 className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-150 text-indigo-700 rounded-lg text-[9px] font-bold"
               >
                 Generate Report
@@ -610,18 +723,22 @@ export default function MlaDashboard() {
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 placeholder="Ask AI query or search keyword..."
-                className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 w-full"
+                disabled={aiLoading}
+                className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 w-full disabled:opacity-60"
               />
               <button
                 type="submit"
-                className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow shrink-0"
+                disabled={aiLoading}
+                className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow shrink-0 disabled:opacity-60"
               >
-                <Send className="w-4 h-4" />
+                {aiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
             </form>
 
           </div>
         </div>
+        </>
+        )}
 
       </div>
 

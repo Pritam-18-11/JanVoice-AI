@@ -1,14 +1,20 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import api from '../api/axios';
 import { useAuth } from './AuthContext';
 
 const GrievanceContext = createContext();
+
+const POLL_INTERVAL_MS = 30000; // 30 seconds — near-real-time without hammering a free-tier backend
 
 export const GrievanceProvider = ({ children }) => {
   const { user } = useAuth();
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [newCount, setNewCount] = useState(0); // complaints that arrived since the user last checked the bell
+
+  const knownIdsRef = useRef(new Set());
+  const hasLoadedOnceRef = useRef(false);
 
   const fetchComplaints = async (params = {}) => {
     if (!user) {
@@ -19,6 +25,15 @@ export const GrievanceProvider = ({ children }) => {
     setError(null);
     try {
       const { data } = await api.get('/complaints', { params });
+
+      // Detect genuinely new complaints for the notification bell (skip on first load)
+      if (hasLoadedOnceRef.current) {
+        const arrivedCount = data.filter((c) => !knownIdsRef.current.has(c.id)).length;
+        if (arrivedCount > 0) setNewCount((prev) => prev + arrivedCount);
+      }
+      knownIdsRef.current = new Set(data.map((c) => c.id));
+      hasLoadedOnceRef.current = true;
+
       setComplaints(data);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load complaints');
@@ -27,23 +42,31 @@ export const GrievanceProvider = ({ children }) => {
     }
   };
 
-  // Refetch whenever the logged-in user changes (login/logout)
+  const clearNewCount = () => setNewCount(0);
+
   useEffect(() => {
+    hasLoadedOnceRef.current = false;
+    knownIdsRef.current = new Set();
+    setNewCount(0);
     fetchComplaints();
+
+    if (!user) return;
+
+    const interval = setInterval(() => fetchComplaints(), POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Accepts a FormData object (so image file upload works)
   const addComplaint = async (formData) => {
     const { data } = await api.post('/complaints', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     setComplaints((prev) => [data, ...prev]);
+    knownIdsRef.current.add(data.id);
     return data;
   };
 
   const updateComplaintStatus = async (id, newStatus, description) => {
-    // Optimistic UI update
     setComplaints((prev) =>
       prev.map((c) =>
         c.id === id
@@ -63,13 +86,14 @@ export const GrievanceProvider = ({ children }) => {
       setComplaints((prev) => prev.map((c) => (c.id === id ? data : c)));
     } catch (err) {
       console.error('Failed to update status on server:', err.response?.data?.message || err.message);
-      // Re-fetch to correct any optimistic drift
       fetchComplaints();
     }
   };
 
   return (
-    <GrievanceContext.Provider value={{ complaints, addComplaint, updateComplaintStatus, fetchComplaints, loading, error }}>
+    <GrievanceContext.Provider
+      value={{ complaints, addComplaint, updateComplaintStatus, fetchComplaints, loading, error, newCount, clearNewCount }}
+    >
       {children}
     </GrievanceContext.Provider>
   );

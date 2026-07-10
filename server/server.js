@@ -6,6 +6,8 @@ import connectDB from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
 import complaintRoutes from './routes/complaintRoutes.js';
 import geocodeRoutes from './routes/geocodeRoutes.js';
+import aiQueryRoutes from './routes/aiQueryRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -21,6 +23,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'JanVoice AI backend is 
 app.use('/api/auth', authRoutes);
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/geocode', geocodeRoutes);
+app.use('/api/ai-query', aiQueryRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));

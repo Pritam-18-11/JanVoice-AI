@@ -1,40 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import { useGrievances } from '../context/GrievanceContext';
+import api from '../api/axios';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, Legend, LineChart, Line
 } from 'recharts';
 import { 
   Server, Users, Bell, AlertTriangle, ShieldCheck, Cpu, 
   Database, RefreshCw, Trash2, Edit3, Settings, Play, 
-  RotateCcw, Check, UserPlus, Send
+  RotateCcw, Check, UserPlus, Send, Inbox
 } from 'lucide-react';
-import { motion } from 'framer-motion';
-
-// Mock User Database for User Management
-const initialUsers = [
-  { id: "USR-001", name: "Pritam Saha", email: "pritam@gmail.com", role: "Citizen", ward: "Ward 10", status: "Verified" },
-  { id: "USR-002", name: "MLA Pritam Saha", email: "mla.pritam@janvoice.in", role: "MP/MLA", ward: "North 24 Parganas", status: "Verified" },
-  { id: "USR-003", name: "Super Admin", email: "admin@janvoice.in", role: "Admin", ward: "Central Division", status: "Verified" },
-  { id: "USR-004", name: "Rajesh Kumar", email: "rajesh.citizen@gmail.com", role: "Citizen", ward: "Ward 4", status: "Pending Verification" },
-  { id: "USR-005", name: "Sita Dev", email: "sita.ward12@yahoo.com", role: "Citizen", ward: "Ward 12", status: "Verified" }
-];
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function AdminDashboard() {
   const { complaints, updateComplaintStatus } = useGrievances();
   const [activeTab, setActiveTab] = useState('monitoring'); // 'monitoring' | 'users' | 'notifications' | 'complaints'
   
-  // States
-  const [users, setUsers] = useState(initialUsers);
+  // Real user directory (Phase 3 — replaces the old dummy initialUsers array)
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [overrideTargetId, setOverrideTargetId] = useState(null);
+
+  const fetchUsers = async () => {
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      const { data } = await api.get('/admin/users');
+      setUsers(data);
+    } catch (err) {
+      setUsersError(err.response?.data?.message || 'Failed to load users');
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
   
-  // Notification logs
-  const [notifications, setNotifications] = useState([
-    { id: "NT-109", recipient: "Pritam Saha (+91 98765-43210)", msg: "ALERT: Grievance JV-2026-9812 has been marked as Resolved by Representative.", status: "Delivered", time: "2026-07-06 16:05" },
-    { id: "NT-108", recipient: "Sunil Das (+91 99112-23344)", msg: "ALERT: Grievance JV-2026-4421 is now flagged as MLA Reviewed. Budget allocated.", status: "Delivered", time: "2026-07-05 10:18" }
+  // Notification logs — still a simulated log for the demo, since real SMS/push dispatch
+  // is outside this project's scope (no telecom/SMS gateway integrated)
+  const [notifications] = useState([
+    { id: "NT-109", recipient: "Registered Citizens (SMS Gateway)", msg: "ALERT: Status-change notifications are dispatched whenever an MLA updates a grievance.", status: "Simulated", time: new Date().toLocaleString() },
   ]);
 
-  // System Monitor Metrics (simulated real-time)
+  // System Monitor Metrics (simulated real-time — no infra metrics API is wired up in this project)
   const [monitorData, setMonitorData] = useState([
     { name: '10s ago', CPU: 24, RAM: 64, API: 12 },
     { name: '8s ago', CPU: 28, RAM: 64, API: 15 },
@@ -72,12 +83,29 @@ export default function AdminDashboard() {
     setTimeout(() => setLoading(false), 2200);
   };
 
-  const handleVerifyUser = (userId) => {
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, status: "Verified" } : u));
+  // Real role/status updates (Phase 3) — hit the backend instead of just local state
+  const handleSetRole = async (userId, role) => {
+    const prev = users;
+    setUsers((cur) => cur.map((u) => (u._id === userId ? { ...u, role } : u)));
+    try {
+      await api.patch(`/admin/users/${userId}/role`, { role });
+    } catch (err) {
+      console.error('Failed to update role:', err.response?.data?.message || err.message);
+      setUsers(prev); // roll back on failure
+      alert('Failed to update role. Please try again.');
+    }
   };
 
-  const handleSuspendUser = (userId) => {
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, status: "Suspended" } : u));
+  const handleSetActive = async (userId, active) => {
+    const prev = users;
+    setUsers((cur) => cur.map((u) => (u._id === userId ? { ...u, active } : u)));
+    try {
+      await api.patch(`/admin/users/${userId}/status`, { active });
+    } catch (err) {
+      console.error('Failed to update status:', err.response?.data?.message || err.message);
+      setUsers(prev);
+      alert('Failed to update status. Please try again.');
+    }
   };
 
   const handleOverrideStatus = (id, nextStatus) => {
@@ -132,8 +160,8 @@ export default function AdminDashboard() {
 
           <div className="glass-card p-5 rounded-2xl flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Active Users</span>
-              {loading ? <SkeletonLine className="h-8 w-20" /> : <p className="text-2xl font-black text-slate-800 dark:text-slate-100">{users.length} <span className="text-xs text-slate-400 font-medium">Verified</span></p>}
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Registered Users</span>
+              {loading || usersLoading ? <SkeletonLine className="h-8 w-20" /> : <p className="text-2xl font-black text-slate-800 dark:text-slate-100">{users.length} <span className="text-xs text-slate-400 font-medium">Total</span></p>}
             </div>
             <div className="w-11 h-11 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 flex items-center justify-center text-slate-400 shadow-inner">
               <Users className="w-5 h-5 text-sky-500" />
@@ -142,11 +170,11 @@ export default function AdminDashboard() {
 
           <div className="glass-card p-5 rounded-2xl flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Outbound Alerts</span>
-              {loading ? <SkeletonLine className="h-8 w-20" /> : <p className="text-2xl font-black text-slate-800 dark:text-slate-100">{notifications.length} <span className="text-xs text-emerald-500 font-bold">Dispatched</span></p>}
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Complaints</span>
+              {loading ? <SkeletonLine className="h-8 w-20" /> : <p className="text-2xl font-black text-slate-800 dark:text-slate-100">{complaints.length} <span className="text-xs text-emerald-500 font-bold">On Record</span></p>}
             </div>
             <div className="w-11 h-11 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 flex items-center justify-center text-slate-400 shadow-inner">
-              <Bell className="w-5 h-5 text-amber-500 animate-swing" />
+              <Bell className="w-5 h-5 text-amber-500" />
             </div>
           </div>
 
@@ -214,7 +242,7 @@ export default function AdminDashboard() {
                 <div className="lg:col-span-8 glass-card p-6 rounded-3xl space-y-4 flex flex-col justify-between h-[360px]">
                   <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-900">
                     <h3 className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">Server Workloads (% Capacity)</h3>
-                    <span className="text-[10px] text-red-500 bg-red-50 dark:bg-red-950/20 px-2 py-0.5 rounded font-mono font-bold animate-pulse">Live Pulse</span>
+                    <span className="text-[10px] text-red-500 bg-red-50 dark:bg-red-950/20 px-2 py-0.5 rounded font-mono font-bold animate-pulse">Simulated Pulse</span>
                   </div>
                   
                   <div className="flex-grow w-full flex items-center justify-center pt-4">
@@ -266,7 +294,7 @@ export default function AdminDashboard() {
               </motion.div>
             )}
 
-            {/* TAB: USER MANAGEMENT */}
+            {/* TAB: USER MANAGEMENT (Phase 3 — wired to real backend) */}
             {activeTab === 'users' && (
               <motion.div 
                 key="users"
@@ -277,16 +305,29 @@ export default function AdminDashboard() {
               >
                 <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-900">
                   <h3 className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">User Accounts Directory</h3>
-                  <button onClick={() => alert("Simulating database verification...")} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 text-white rounded-lg text-xs font-bold flex items-center gap-1">
-                    <UserPlus className="w-3.5 h-3.5" /> Verify All Pending
+                  <button onClick={fetchUsers} className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 text-white rounded-lg text-xs font-bold flex items-center gap-1">
+                    <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
                 </div>
 
+                {usersError && (
+                  <div className="text-xs text-red-600 bg-red-50 border border-red-100 p-3 rounded-xl font-semibold">{usersError}</div>
+                )}
+
+                {usersLoading && users.length === 0 ? (
+                  <div className="space-y-3 animate-pulse">
+                    {[1, 2, 3, 4].map((i) => <div key={i} className="h-10 w-full bg-slate-100 dark:bg-slate-900 rounded-xl" />)}
+                  </div>
+                ) : users.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 text-slate-400 py-12">
+                    <Inbox className="w-8 h-8 stroke-1" />
+                    <span className="italic text-xs">No registered users yet.</span>
+                  </div>
+                ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs text-left">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-slate-900 text-slate-400 font-bold uppercase tracking-wider text-[9px] bg-slate-50/50 dark:bg-slate-900/30">
-                        <th className="py-3 px-4">User ID</th>
                         <th className="py-3 px-4">Full Name</th>
                         <th className="py-3 px-4">Email</th>
                         <th className="py-3 px-4">Account Type</th>
@@ -297,38 +338,40 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-900">
                       {users.map((u) => (
-                        <tr key={u.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-900/30 transition-colors">
-                          <td className="py-4 px-4 font-mono font-bold text-slate-600 dark:text-slate-400">{u.id}</td>
+                        <tr key={u._id} className="hover:bg-slate-50/80 dark:hover:bg-slate-900/30 transition-colors">
                           <td className="py-4 px-4 font-bold text-slate-800 dark:text-slate-200">{u.name}</td>
                           <td className="py-4 px-4 font-medium text-slate-500 dark:text-slate-400">{u.email}</td>
                           <td className="py-4 px-4">
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${
-                              u.role === 'Admin' ? 'bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 border-red-100 dark:border-red-900/40' :
-                              u.role === 'MP/MLA' ? 'bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/40' :
-                              'bg-sky-50 dark:bg-sky-950/20 text-sky-600 dark:text-sky-400 border-sky-100 dark:border-sky-900/40'
-                            }`}>{u.role}</span>
+                            <select
+                              value={u.role}
+                              onChange={(e) => handleSetRole(u._id, e.target.value)}
+                              className={`px-2 py-1 rounded text-[9px] font-bold border focus:outline-none ${
+                                u.role === 'admin' ? 'bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 border-red-100 dark:border-red-900/40' :
+                                u.role === 'mla' ? 'bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/40' :
+                                'bg-sky-50 dark:bg-sky-950/20 text-sky-600 dark:text-sky-400 border-sky-100 dark:border-sky-900/40'
+                              }`}
+                            >
+                              <option value="citizen">Citizen</option>
+                              <option value="mla">MP/MLA</option>
+                              <option value="admin">Admin</option>
+                            </select>
                           </td>
                           <td className="py-4 px-4 font-semibold text-slate-700 dark:text-slate-300">{u.ward}</td>
                           <td className="py-4 px-4">
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                              u.status === 'Verified' ? 'bg-green-50 dark:bg-green-950/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900/40' :
-                              u.status === 'Suspended' ? 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-900/40' :
-                              'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40'
-                            }`}>{u.status}</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                              u.active
+                                ? 'bg-green-50 dark:bg-green-950/20 text-green-700 dark:text-green-400 border-green-200 dark:border-green-900/40'
+                                : 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-900/40'
+                            }`}>{u.active ? 'Active' : 'Suspended'}</span>
                           </td>
                           <td className="py-4 px-4 text-right flex justify-end gap-1.5">
-                            {u.status === 'Pending Verification' && (
-                              <button onClick={() => handleVerifyUser(u.id)} className="p-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold text-[9px] flex items-center gap-0.5">
-                                <Check className="w-3 h-3" /> Verify
-                              </button>
-                            )}
-                            {u.status !== 'Suspended' ? (
-                              <button onClick={() => handleSuspendUser(u.id)} className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-[9px]">
+                            {u.active ? (
+                              <button onClick={() => handleSetActive(u._id, false)} className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-[9px]">
                                 Suspend
                               </button>
                             ) : (
-                              <button onClick={() => handleVerifyUser(u.id)} className="p-1.5 bg-slate-200 text-slate-700 rounded-lg font-bold text-[9px]">
-                                Unsuspend
+                              <button onClick={() => handleSetActive(u._id, true)} className="p-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold text-[9px] flex items-center gap-0.5">
+                                <Check className="w-3 h-3" /> Reactivate
                               </button>
                             )}
                           </td>
@@ -337,6 +380,7 @@ export default function AdminDashboard() {
                     </tbody>
                   </table>
                 </div>
+                )}
               </motion.div>
             )}
 
@@ -351,7 +395,7 @@ export default function AdminDashboard() {
               >
                 <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-900">
                   <h3 className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">Notification Broadcast Log</h3>
-                  <span className="text-[10px] text-slate-400 font-mono font-bold">Outbound Gateway: Active</span>
+                  <span className="text-[10px] text-slate-400 font-mono font-bold">No SMS gateway wired up (demo only)</span>
                 </div>
 
                 <div className="space-y-3">
@@ -366,7 +410,7 @@ export default function AdminDashboard() {
                       </div>
                       
                       <div className="text-right shrink-0">
-                        <span className="px-2 py-0.5 bg-green-50 dark:bg-green-950/20 text-green-700 dark:text-green-400 rounded-full font-bold text-[9px] border border-green-200 dark:border-green-900/40">
+                        <span className="px-2 py-0.5 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 rounded-full font-bold text-[9px] border border-amber-200 dark:border-amber-900/40">
                           {n.status}
                         </span>
                       </div>
@@ -389,6 +433,12 @@ export default function AdminDashboard() {
                   <h3 className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">Grievance Overrides & Moderation</h3>
                 </div>
 
+                {complaints.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 text-slate-400 py-12">
+                    <Inbox className="w-8 h-8 stroke-1" />
+                    <span className="italic text-xs">No complaints on record yet.</span>
+                  </div>
+                ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs text-left">
                     <thead>
@@ -438,6 +488,7 @@ export default function AdminDashboard() {
                     </tbody>
                   </table>
                 </div>
+                )}
               </motion.div>
             )}
 
