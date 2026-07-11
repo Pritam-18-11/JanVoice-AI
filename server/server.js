@@ -8,6 +8,7 @@ import complaintRoutes from './routes/complaintRoutes.js';
 import geocodeRoutes from './routes/geocodeRoutes.js';
 import aiQueryRoutes from './routes/aiQueryRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import wardProfileRoutes from './routes/wardProfileRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -25,6 +26,7 @@ app.use('/api/complaints', complaintRoutes);
 app.use('/api/geocode', geocodeRoutes);
 app.use('/api/ai-query', aiQueryRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/ward-profiles', wardProfileRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));

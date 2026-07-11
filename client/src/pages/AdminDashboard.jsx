@@ -192,9 +192,9 @@ export default function AdminDashboard() {
         {/* Tab Toggle Navigation */}
         <div className="flex border-b border-slate-200 dark:border-slate-800 text-xs font-bold gap-4">
           {[
-            { id: 'monitoring', label: 'Systems Monitoring' },
+            { id: 'monitoring', label: 'Systems Monitoring (Simulated)' },
             { id: 'users', label: 'User Directory' },
-            { id: 'notifications', label: 'Outbound Notification Log' },
+            { id: 'notifications', label: 'Notification Log (Demo)' },
             { id: 'complaints', label: 'Grievance Override' }
           ].map((tab) => (
             <button

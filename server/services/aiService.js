@@ -1,10 +1,9 @@
 // Core AI triage engine — takes the raw citizen complaint text (+ transcribed
-// voice note) and returns a structured summary, severity, priority score,
-// impact estimate, and recommendation, using Gemini.
-export async function analyzeComplaint({ description, voiceText, category, landmark, areaName, imageVerified, imageConfidence }) {
+// voice note + ward development context) and returns a structured summary,
+// severity, priority score, impact estimate, and recommendation, using Gemini.
+export async function analyzeComplaint({ description, voiceText, category, landmark, areaName, imageVerified, imageConfidence, wardProfile }) {
   const apiKey = process.env.GEMINI_API_KEY;
 
-  // Graceful fallback so the app still works end-to-end without an API key configured
   if (!apiKey) {
     return {
       summary: description.slice(0, 140),
@@ -19,16 +18,28 @@ export async function analyzeComplaint({ description, voiceText, category, landm
 
   const combinedText = [description, voiceText ? `Voice note transcript: ${voiceText}` : null].filter(Boolean).join('\n\n');
 
-  const prompt = `You are the AI triage engine for a citizen grievance platform used by local government representatives (MP/MLA) in India.
+  const wardContext = wardProfile
+    ? `Constituency development context for this ward (from local development plans & public datasets):
+- Population: ${wardProfile.population}
+- Literacy rate: ${wardProfile.literacyRate}
+- Schools: ${wardProfile.schools} (total enrollment: ${wardProfile.schoolEnrollment}, avg travel distance: ${wardProfile.avgSchoolTravelDistanceKm} km)
+- Hospitals: ${wardProfile.hospitals} (avg travel distance: ${wardProfile.avgHospitalTravelDistanceKm} km)
+- Existing development plans already proposed/approved: ${wardProfile.existingDevelopmentPlans.join('; ') || 'None on record'}
+- Known infrastructure gaps: ${wardProfile.infrastructureGaps.join('; ') || 'None on record'}`
+    : 'No constituency development data available for this ward.';
 
-Analyze this citizen complaint and respond ONLY with strict JSON (no markdown, no extra commentary) in this exact shape:
+  const prompt = `You are the AI triage engine for a citizen grievance platform used by local government representatives (MP/MLA) in India. Your priority scoring and recommendations must be genuinely grounded in the ward's real demand data below — not just the single complaint text — because MPs must weigh competing proposals (e.g. a school upgrade request vs. actual enrollment and travel-distance data vs. a proposed vocational centre).
+
+${wardContext}
+
+Respond ONLY with strict JSON (no markdown, no extra commentary) in this exact shape:
 {
   "summary": "one crisp sentence describing the core problem",
   "severity": "Low" or "Medium" or "High",
-  "impact": "one short sentence describing the real-world impact",
-  "peopleAffected": "an estimated number range as a string, e.g. '500+' or '2,000+'",
-  "recommendation": "one concrete, actionable solution a municipal authority could implement",
-  "priorityScore": a number from 0 to 100 combining severity, population affected, and infrastructure importance,
+  "impact": "one short sentence describing the real-world impact, referencing the ward data above where relevant (e.g. population affected, travel distance, enrollment)",
+  "peopleAffected": "an estimated number range as a string, e.g. '500+' or '2,000+' — ground this in the ward's actual population figure where possible",
+  "recommendation": "one concrete, actionable solution a municipal authority could implement, informed by existing development plans and infrastructure gaps listed above",
+  "priorityScore": a number from 0 to 100 combining severity, population affected, infrastructure gap alignment, and how well this complaint aligns with or duplicates existing development plans,
   "confidenceScore": a number from 0 to 100 representing how confident you are in this analysis given the information provided
 }
 

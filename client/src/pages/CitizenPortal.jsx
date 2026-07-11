@@ -359,12 +359,22 @@ export default function CitizenPortal() {
             {/* Voice Recording Details */}
             {complaint.voiceText && (
               <div className="glass-card p-5 rounded-3xl space-y-3">
-                <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                  <FileText className="w-4 h-4 text-slate-400" /> Citizen Voice Submission
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-slate-400" /> Citizen Voice Submission
+                  </h4>
+                  {complaint.voiceLanguage && (
+                    <span className="text-[9px] font-bold uppercase bg-indigo-50 text-indigo-600 border border-indigo-100 px-2 py-0.5 rounded-full">
+                      Detected language: {complaint.voiceLanguage}
+                    </span>
+                  )}
+                </div>
                 <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs italic text-slate-600 leading-relaxed">
                   "{complaint.voiceText}"
                 </div>
+                <p className="text-[9px] text-slate-400 leading-relaxed">
+                  Transcribed automatically by Whisper AI (Groq) — citizens can speak in any local language, no manual translation needed.
+                </p>
               </div>
             )}
 
@@ -411,12 +421,9 @@ export default function CitizenPortal() {
               <p className="text-xs leading-relaxed text-slate-400">
                 This pipeline runs on Groq, Gemini Vision, and Whisper. Updates reflect immediately as civic agencies inspect the site.
               </p>
-              <button 
-                onClick={() => alert("Citizens are automatically notified via registered contact number once status changes.")} 
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
-              >
-                Enable SMS Notifications
-              </button>
+              <div className="w-full py-2 px-3 bg-slate-800/60 text-slate-400 rounded-xl text-[10px] font-medium border border-slate-700 text-center leading-relaxed">
+                📱 SMS notifications on status change — <span className="text-slate-300 font-semibold">on the roadmap</span>, not yet wired to a live SMS gateway. Check back on this page for live updates.
+              </div>
             </div>
           </div>
         </div>

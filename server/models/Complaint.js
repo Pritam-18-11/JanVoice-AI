@@ -31,6 +31,7 @@ const complaintSchema = new mongoose.Schema(
 
     voiceUrl: { type: String, default: null },
     voiceText: { type: String, default: null },
+    voiceLanguage: { type: String, default: null }, // detected by Whisper — proof of multilingual support
 
     imageUrl: { type: String, default: null },
     imageClassification: { type: String, default: 'Not yet processed by AI pipeline' },

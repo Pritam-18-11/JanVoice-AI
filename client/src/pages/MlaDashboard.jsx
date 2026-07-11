@@ -25,6 +25,13 @@ export default function MlaDashboard() {
   
   // Selected Complaint for Detail Drawer
   const [selectedId, setSelectedId] = useState(null);
+
+  // Constituency development context (population, schools, existing plans) — grounds
+  // AI priority scoring and the drawer's context panel in real ward-level demand data.
+  const [wardProfiles, setWardProfiles] = useState({});
+  useEffect(() => {
+    api.get('/ward-profiles').then(({ data }) => setWardProfiles(data)).catch(() => setWardProfiles({}));
+  }, []);
   
   // Chat Assistant States
   const [chatMessages, setChatMessages] = useState([
@@ -121,6 +128,15 @@ export default function MlaDashboard() {
   }));
 
   const COLORS = ['#0ea5e9', '#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#f59e0b', '#10b981'];
+
+  // Recurring theme clusters — surfaces complaints the duplicate-detection pipeline has
+  // merged (mergedCount > 1), sorted by how many citizens reported the same underlying issue.
+  const recurringClusters = useMemo(() => {
+    return complaints
+      .filter((c) => c.mergedCount > 1)
+      .sort((a, b) => b.mergedCount - a.mergedCount)
+      .slice(0, 6);
+  }, [complaints]);
 
   // Real 7-day trend — filed vs resolved counts derived from actual timestamps (Phase 3, replaces hardcoded dummy data)
   const trendData = useMemo(() => {
@@ -531,6 +547,35 @@ export default function MlaDashboard() {
           </div>
         </div>
 
+        {/* Recurring Theme Clusters — surfaces duplicate-detected issues so the MLA can see 
+            "recurring needs" at a glance, directly, instead of digging through individual complaints */}
+        {recurringClusters.length > 0 && (
+          <div className="glass-card p-5 rounded-3xl space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-slate-400" /> Recurring Theme Clusters
+              </h3>
+              <span className="text-[10px] text-slate-400 font-mono">Multiple citizens reporting the same underlying issue</span>
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {recurringClusters.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setSelectedId(c.id)}
+                  className="shrink-0 w-56 text-left bg-indigo-50/50 hover:bg-indigo-50 border border-indigo-100 rounded-2xl p-3.5 transition-colors"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[9px] font-bold uppercase text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded">{c.mergedCount} reports merged</span>
+                    <span className={`text-[9px] font-bold ${c.priorityScore >= 80 ? 'text-red-500' : 'text-amber-500'}`}>P{c.priorityScore}</span>
+                  </div>
+                  <span className="font-bold text-slate-800 text-xs block leading-snug truncate">{c.title}</span>
+                  <span className="text-[10px] text-slate-500">{c.category} · {c.ward}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Lower Grid: Main Database Table & AI Chat Sidebar */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
@@ -830,6 +875,35 @@ export default function MlaDashboard() {
                     {selectedComplaint.recommendation}
                   </p>
                 </div>
+
+                {/* Constituency Development Context — the real demand data the AI weighs this complaint against */}
+                {wardProfiles[selectedComplaint.ward] && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-500 uppercase text-[10px]">Constituency Development Context — {selectedComplaint.ward}</span>
+                      <span className="text-[8px] text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded font-bold">Reference dataset</span>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-150 rounded-xl p-3.5 grid grid-cols-2 gap-y-2 gap-x-3 text-[10px]">
+                      <div><span className="text-slate-400 font-semibold block">Population</span><span className="font-bold text-slate-700">{wardProfiles[selectedComplaint.ward].population}</span></div>
+                      <div><span className="text-slate-400 font-semibold block">Literacy Rate</span><span className="font-bold text-slate-700">{wardProfiles[selectedComplaint.ward].literacyRate}</span></div>
+                      <div><span className="text-slate-400 font-semibold block">Schools / Enrollment</span><span className="font-bold text-slate-700">{wardProfiles[selectedComplaint.ward].schools} schools, {wardProfiles[selectedComplaint.ward].schoolEnrollment} students</span></div>
+                      <div><span className="text-slate-400 font-semibold block">Avg School Distance</span><span className="font-bold text-slate-700">{wardProfiles[selectedComplaint.ward].avgSchoolTravelDistanceKm} km</span></div>
+                      <div><span className="text-slate-400 font-semibold block">Hospitals</span><span className="font-bold text-slate-700">{wardProfiles[selectedComplaint.ward].hospitals}</span></div>
+                      <div><span className="text-slate-400 font-semibold block">Avg Hospital Distance</span><span className="font-bold text-slate-700">{wardProfiles[selectedComplaint.ward].avgHospitalTravelDistanceKm} km</span></div>
+                    </div>
+                    {wardProfiles[selectedComplaint.ward].existingDevelopmentPlans?.length > 0 && (
+                      <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 text-[10px]">
+                        <span className="text-slate-400 font-bold uppercase block mb-1">Existing Development Plans</span>
+                        <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+                          {wardProfiles[selectedComplaint.ward].existingDevelopmentPlans.map((p, i) => <li key={i}>{p}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    <p className="text-[9px] text-slate-400 leading-relaxed italic">
+                      This is a structured reference dataset used to ground AI priority scoring in real ward-level demand — in production it would sync with Census/UDISE+/health-infra open-data portals.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Drawer Footer Actions */}

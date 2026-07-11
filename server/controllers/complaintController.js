@@ -5,6 +5,7 @@ import { verifyImage } from '../services/visionService.js';
 import { analyzeComplaint } from '../services/aiService.js';
 import { findDuplicate } from '../services/duplicateService.js';
 import { uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js';
+import { getWardProfile } from '../data/wardProfiles.js';
 
 // @route POST /api/complaints  (protected) — runs the full AI pipeline synchronously
 export const createComplaint = async (req, res) => {
@@ -21,14 +22,18 @@ export const createComplaint = async (req, res) => {
     // 1. Reverse geocode the GPS coordinates — authoritative, always recomputed server-side
     const { areaName, ward, district } = await reverseGeocode(parseFloat(lat), parseFloat(lng));
 
-    // 2. Transcribe voice note (Whisper) and upload it to Cloudinary in parallel
+    // 2. Transcribe voice note (Whisper, with detected language) + upload to Cloudinary in parallel
     let voiceText = null;
+    let voiceLanguage = null;
     let voiceUploadResult = null;
     if (voiceFile) {
-      [voiceText, voiceUploadResult] = await Promise.all([
+      const [transcription, uploadResult] = await Promise.all([
         transcribeAudio(voiceFile.buffer, voiceFile.originalname, voiceFile.mimetype),
-        uploadBufferToCloudinary(voiceFile.buffer, 'janvoice-ai/voice', 'video'), // Cloudinary stores audio under 'video' resource type
+        uploadBufferToCloudinary(voiceFile.buffer, 'janvoice-ai/voice', 'video'),
       ]);
+      voiceText = transcription.text;
+      voiceLanguage = transcription.language;
+      voiceUploadResult = uploadResult;
     }
 
     // 3. Verify uploaded image with Gemini Vision + upload to Cloudinary in parallel
@@ -41,7 +46,12 @@ export const createComplaint = async (req, res) => {
       ]);
     }
 
-    // 4. Gemini text triage — summary, severity, priority, impact, recommendation
+    // 4. Pull the constituency development context for this ward (population, schools,
+    //    travel distance, existing plans, infra gaps) — this is what grounds the AI's
+    //    priority scoring in real demand data instead of just the raw complaint text.
+    const wardProfile = getWardProfile(ward);
+
+    // 5. Gemini text triage — summary, severity, priority, impact, recommendation
     const aiResult = await analyzeComplaint({
       description,
       voiceText,
@@ -50,9 +60,10 @@ export const createComplaint = async (req, res) => {
       areaName,
       imageVerified: imageVerification.verified,
       imageConfidence: imageVerification.confidence,
+      wardProfile,
     });
 
-    // 5. Duplicate / cluster detection — bump the existing issue's merge count
+    // 6. Duplicate / cluster detection — bump the existing issue's merge count
     const duplicate = await findDuplicate(category, ward);
     if (duplicate) {
       duplicate.mergedCount += 1;
@@ -73,6 +84,7 @@ export const createComplaint = async (req, res) => {
       district,
       voiceUrl: voiceUploadResult?.secure_url || null,
       voiceText,
+      voiceLanguage,
       imageUrl: imageUploadResult?.secure_url || null,
       imageClassification: imageVerification.classification,
       imageConfidence: imageVerification.confidence,
@@ -87,7 +99,6 @@ export const createComplaint = async (req, res) => {
       mergedCount: 1,
     });
 
-    // Mark the "AI Processing" timeline step complete since we ran the pipeline synchronously
     complaint.timeline = complaint.timeline.map((step) =>
       step.status === 'AI Processing'
         ? { ...step.toObject(), time: new Date(), description: `AI pipeline complete — ${aiResult.confidenceScore}% confidence.`, active: true }
@@ -102,7 +113,7 @@ export const createComplaint = async (req, res) => {
   }
 };
 
-// @route GET /api/complaints  (protected) — supports ?category=&status=&ward=&search=
+// @route GET /api/complaints  (protected)
 export const getComplaints = async (req, res) => {
   try {
     const { category, status, ward, search } = req.query;
@@ -130,7 +141,7 @@ export const getComplaints = async (req, res) => {
   }
 };
 
-// @route GET /api/complaints/:id  (protected) — :id is the human tracking id
+// @route GET /api/complaints/:id  (protected)
 export const getComplaintById = async (req, res) => {
   try {
     const complaint = await Complaint.findOne({ id: req.params.id });
